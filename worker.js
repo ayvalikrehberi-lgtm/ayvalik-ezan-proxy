@@ -2,55 +2,56 @@ export default {
   async fetch(request) {
     try {
       const url = new URL(request.url);
-      const cityId = url.pathname.replace("/", "").trim();
+      const cityId = url.searchParams.get("cityId") || "9269";
 
-      if (!cityId) {
-        return new Response(JSON.stringify({ error: "City ID missing" }), {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        });
+      const diyanetUrl = `https://namazvakitleri.diyanet.gov.tr/tr-TR/${cityId}/ayvalik-namaz-vakitleri`;
+      
+      const html = await fetch(diyanetUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0"
+        }
+      }).then(r => r.text());
+
+      // REGEX İLE ÇEKİYORUZ
+      function extract(name) {
+        const regex = new RegExp(`var _${name}Time = "([0-9:]+)"`);
+        const match = html.match(regex);
+        return match ? match[1] : null;
       }
 
-      // Diyanet JSON URL
-      const targetUrl = `http://namazvakitleri.diyanet.gov.tr/tr-TR/${cityId}?output=json`;
+      const data = {
+        imsak: extract("imsak"),
+        gunes: extract("gunes"),
+        ogle: extract("ogle"),
+        ikindi: extract("ikindi"),
+        aksam: extract("aksam"),
+        yatsi: extract("yatsi")
+      };
 
-      // Cloudflare Cache
-      const cache = caches.default;
-      const cacheKey = new Request(targetUrl);
-
-      let cached = await cache.match(cacheKey);
-      if (cached) {
-        return cached;
-      }
-
-      // Diyanet’ten veri çek
-      const response = await fetch(targetUrl);
-
-      if (!response.ok) {
-        return new Response(JSON.stringify({ error: "Diyanet error" }), {
+      // Eksik varsa hata ver
+      if (!data.imsak || !data.yatsi) {
+        return new Response(JSON.stringify({ error: "Parse failed", data }), {
           status: 500,
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json" }
         });
       }
 
-      const data = await response.text();
-
-      // Cache kaydı 10 dakika
-      const output = new Response(data, {
+      return new Response(JSON.stringify({
+        cityId,
+        success: true,
+        times: data
+      }), {
         headers: {
           "Content-Type": "application/json",
-          "Cache-Control": "public, max-age=600",
-        },
+          "Cache-Control": "public, max-age=1800" // 30 dk cache
+        }
       });
 
-      await cache.put(cacheKey, output.clone());
-
-      return output;
     } catch (err) {
-      return new Response(JSON.stringify({ error: err.message }), {
+      return new Response(JSON.stringify({ error: err.toString() }), {
         status: 500,
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json" }
       });
     }
-  },
+  }
 };
